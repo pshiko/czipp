@@ -7,19 +7,58 @@
 
 #include <tuple>
 #include <iterator>
+#include <type_traits>
 
 namespace czipp {
 
-template<typename... Containers>
-class zip_iterator
-        : std::iterator<std::forward_iterator_tag, std::tuple<typename Containers::value_type...>> {
-private:
-using indices = std::make_index_sequence<sizeof...(Containers)>; // Index sequence for accessing elements in tuples.
-using value_type = std::tuple<typename Containers::value_type...>;   // Tuple of types in containers.
-using iterators_tuple = std::tuple<Containers...>; // Tuple of iterators in containters.
-using this_type = zip_iterator<Containers...>; // Self type.
+struct get_iterator_or_pointer_impl {
+    template<typename T>
+    static decltype(std::begin(T())) get(T*);
+
+    template<typename T, std::enable_if_t<std::is_pointer<T>::value, std::nullptr_t> = nullptr>
+    static T get(T);
+
+    template<typename T, std::enable_if_t<std::is_array<T>::value, std::nullptr_t> = nullptr>
+    static typename std::add_pointer<typename std::remove_extent<T>::type>::type get(T);
+};
+
+template<typename T>
+struct get_iterator_or_pointer{
 public:
-zip_iterator(Containers... iters) : p_({iters...}) {}
+    using type = decltype(get_iterator_or_pointer_impl::template get<T>(nullptr));
+};
+
+struct get_value_type_impl {
+    template<typename T>
+    static typename T::value_type get(typename T::value_type*);
+
+    template<typename T, std::enable_if_t<std::is_pointer<T>::value, std::nullptr_t> = nullptr>
+    static typename std::remove_pointer<T>::type get(T);
+
+    template<typename T, std::enable_if_t<std::is_array<T>::value, std::nullptr_t> = nullptr>
+    static typename std::remove_extent<T>::type get(T);
+};
+
+template<typename T>
+struct get_value_type{
+public:
+    using type = decltype(get_value_type_impl::template get<T>(nullptr));
+};
+
+template<typename... Iterators>
+class zip_iterator
+        : std::iterator<std::forward_iterator_tag, std::tuple<typename get_value_type<Iterators>::type...>> {
+private:
+
+
+
+
+using indices = std::make_index_sequence<sizeof...(Iterators)>; // Index sequence for accessing elements in tuples.
+using value_type = std::tuple<typename get_value_type<Iterators>::type...>;   // Tuple of types in iterators.
+using iterators_tuple = std::tuple<Iterators...>; // Tuple of iterators.
+using this_type = zip_iterator<Iterators...>; // Self type.
+public:
+zip_iterator(Iterators... iters) : p_({iters...}) {}
 
 // Increment and decrement for iterator implement.
 zip_iterator &operator++() {
@@ -73,12 +112,12 @@ bool all_cmp(Fnc fnc, const this_type &rhs) const {
     return this_type::all_cmp_impl(fnc, *this, rhs);
 }
 
-template<std::size_t n = 0, typename Fnc, std::enable_if_t<n < (sizeof...(Containers)), std::nullptr_t> = nullptr>
+template<std::size_t n = 0, typename Fnc, std::enable_if_t<n < (sizeof...(Iterators)), std::nullptr_t> = nullptr>
 static bool all_cmp_impl(Fnc fnc, const this_type &lhs, const this_type &rhs) {
     return fnc(std::get<n>(lhs.dereference()), std::get<n>(rhs.dereference())) && this_type::all_cmp_impl<n + 1>(fnc, lhs, rhs);
 };
 
-template<std::size_t n, typename Fnc, std::enable_if_t<n == (sizeof...(Containers)), std::nullptr_t> = nullptr>
+template<std::size_t n, typename Fnc, std::enable_if_t<n == (sizeof...(Iterators)), std::nullptr_t> = nullptr>
 static bool all_cmp_impl(Fnc, const this_type &, const this_type &) {
     return true;
 };
@@ -89,12 +128,12 @@ bool any_cmp(Fnc fnc, const this_type &rhs) const {
     return this_type::any_cmp_impl(fnc, *this, rhs);
 }
 
-template<std::size_t n = 0, typename Fnc, std::enable_if_t<n < (sizeof...(Containers)), std::nullptr_t> = nullptr>
+template<std::size_t n = 0, typename Fnc, std::enable_if_t<n < (sizeof...(Iterators)), std::nullptr_t> = nullptr>
 static bool any_cmp_impl(Fnc fnc, const this_type &lhs, const this_type &rhs) {
     return fnc(std::get<n>(lhs.dereference()), std::get<n>(rhs.dereference())) || this_type::all_cmp_impl<n + 1>(fnc, lhs, rhs);
 };
 
-template<std::size_t n, typename Fnc, std::enable_if_t<n == (sizeof...(Containers)), std::nullptr_t> = nullptr>
+template<std::size_t n, typename Fnc, std::enable_if_t<n == (sizeof...(Iterators)), std::nullptr_t> = nullptr>
 static bool any_cmp_impl(Fnc , const this_type &, const this_type &) {
     return false;
 };
@@ -125,10 +164,10 @@ iterators_tuple p_;
 template<typename... Args>
 class zip{
 public:
-    using iterator = zip_iterator<typename Args::iterator...>;
+    using iterator = zip_iterator<typename get_iterator_or_pointer<Args>::type...>;
     zip(Args&... args): begin_({std::begin(args)...}), end_({std::end(args)...}){};
-    zip_iterator<typename Args::iterator...> begin_;
-    zip_iterator<typename Args::iterator...> end_;
+    zip_iterator<typename get_iterator_or_pointer<Args>::type...> begin_;
+    zip_iterator<typename get_iterator_or_pointer<Args>::type...> end_;
     auto& begin() {return begin_;}
     auto& end() {return end_;}
 };
